@@ -1,0 +1,13 @@
+{
+  "name": "pdf-viewer-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PDF 뷰어 - made by 조민철",
+  "author": "조민철",
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "pdfjs-dist": "6.4.299"
+  }
+}
