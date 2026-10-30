@@ -22,6 +22,119 @@ jobs:
           cp node_modules/pdfjs-dist/legacy/build/pdf.min.mjs node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs www/pdfjs/legacy/build/
           cp -r node_modules/pdfjs-dist/cmaps node_modules/pdfjs-dist/standard_fonts node_modules/pdfjs-dist/wasm www/pdfjs/
       - run: npx cap add android
+      - name: PDF 열기 연결 설정 (카카오톡·웹에서 열기 목록에 표시)
+        run: |
+          cat > android/app/src/main/java/com/minchul/pdfviewer/MainActivity.java <<'JAVA'
+          package com.minchul.pdfviewer;
+
+          import android.content.Intent;
+          import android.database.Cursor;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.provider.OpenableColumns;
+          import android.webkit.WebView;
+          import com.getcapacitor.BridgeActivity;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import org.json.JSONObject;
+
+          public class MainActivity extends BridgeActivity {
+            private final Handler handler = new Handler(Looper.getMainLooper());
+
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              handle(getIntent());
+            }
+
+            @Override
+            protected void onNewIntent(Intent intent) {
+              super.onNewIntent(intent);
+              setIntent(intent);
+              handle(intent);
+            }
+
+            private void handle(Intent intent) {
+              if (intent == null) return;
+              String action = intent.getAction();
+              Uri uri = null;
+              if (Intent.ACTION_VIEW.equals(action)) uri = intent.getData();
+              else if (Intent.ACTION_SEND.equals(action)) uri = (Uri) intent.getParcelableExtra(Intent.EXTRA_STREAM);
+              if (uri == null) return;
+              final Uri u = uri;
+              new Thread(() -> {
+                try {
+                  String name = queryName(u);
+                  File dir = getCacheDir();
+                  File[] old = dir.listFiles();
+                  if (old != null) for (File f : old) if (f.getName().startsWith("incoming_")) f.delete();
+                  File out = new File(dir, "incoming_" + System.currentTimeMillis() + ".pdf");
+                  try (InputStream in = getContentResolver().openInputStream(u); OutputStream os = new FileOutputStream(out)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                  }
+                  push(out.getAbsolutePath(), name, 0);
+                } catch (Exception e) {
+                  e.printStackTrace();
+                }
+              }).start();
+            }
+
+            private String queryName(Uri u) {
+              String name = "document.pdf";
+              try (Cursor c = getContentResolver().query(u, null, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                  int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                  if (i >= 0 && c.getString(i) != null) name = c.getString(i);
+                }
+              } catch (Exception ignored) {}
+              return name;
+            }
+
+            private void push(final String path, final String name, final int tries) {
+              handler.post(() -> {
+                WebView wv = getBridge() != null ? getBridge().getWebView() : null;
+                String js = "typeof window.__openIncoming==='function'&&(window.__openIncoming("
+                    + JSONObject.quote(path) + "," + JSONObject.quote(name) + "),true)";
+                if (wv == null) {
+                  if (tries < 40) handler.postDelayed(() -> push(path, name, tries + 1), 500);
+                  return;
+                }
+                wv.evaluateJavascript(js, v -> {
+                  if (!"true".equals(v) && tries < 40) handler.postDelayed(() -> push(path, name, tries + 1), 500);
+                });
+              });
+            }
+          }
+          JAVA
+          python3 - <<'PY'
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          filters = '''
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="content" />
+                      <data android:scheme="file" />
+                      <data android:mimeType="application/pdf" />
+                      <data android:mimeType="application/x-pdf" />
+                  </intent-filter>
+                  <intent-filter>
+                      <action android:name="android.intent.action.SEND" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <data android:mimeType="application/pdf" />
+                  </intent-filter>
+              '''
+          assert '</activity>' in s
+          s = s.replace('</activity>', filters + '</activity>', 1)
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
       - run: npx cap sync android
       - run: ./gradlew assembleDebug
         working-directory: android
