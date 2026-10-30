@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#1b1e23">
+<meta name="author" content="조민철">
 <title>PDF 뷰어</title>
 <style>
   :root {
@@ -186,6 +187,7 @@
     .ib { min-width: 38px; padding: 0 4px; }
     .sep { display: none; }
   }
+  .credit { margin-top: 28px; font-size: 13px; opacity: .6; text-align: center; letter-spacing: .02em; }
 </style>
 </head>
 <body>
@@ -240,6 +242,7 @@
       <div>글자를 길게 눌러 선택·복사</div>
       <div>PC에서는 파일을 끌어다 놓아도 돼요</div>
     </div>
+    <div class="credit">made by 조민철</div>
   </div>
 </main>
 
@@ -259,6 +262,27 @@
 
 <script>
   window.__pending = null;
+  // 안드로이드 앱: 다른 앱(카카오톡, 브라우저 등)에서 "열기"로 넘어온 PDF 받기
+  window.__checkIncoming = function () {
+    try {
+      if (window.__incBusy || !window.AndroidPdf) return;
+      var id = AndroidPdf.pendingId();
+      if (!id || id === window.__lastInc) return;
+      var n = AndroidPdf.chunkCount();
+      if (!n) return;
+      window.__incBusy = true; window.__lastInc = id;
+      var name = AndroidPdf.pendingName() || "document.pdf", parts = [];
+      for (var i = 0; i < n; i++) {
+        var bin = atob(AndroidPdf.chunk(i)), u = new Uint8Array(bin.length);
+        for (var j = 0; j < bin.length; j++) u[j] = bin.charCodeAt(j);
+        parts.push(u);
+      }
+      var f = new File(parts, name, { type: "application/pdf" });
+      if (window.__openFile) window.__openFile(f); else window.__pending = f;
+    } catch (e) { alert("파일을 열지 못했어요: " + (e && e.message || e)); }
+    window.__incBusy = false;
+  };
+  setInterval(function () { window.__checkIncoming(); }, 700);
   function __showErr(msg) {
     var t = document.getElementById("emptyTitle"), m = document.getElementById("emptyMsg");
     if (t && m && !window.__ready) { t.textContent = "문제가 생겼어요"; m.textContent = msg; }
@@ -277,20 +301,20 @@
     e.target.value = "";
   });
   setTimeout(function () {
-    if (!window.__libReady) __showErr("PDF 라이브러리를 불러오지 못했어요. 인터넷 연결을 확인하고 다시 열어주세요.");
+    if (!window.__libReady) __showErr("PDF 라이브러리를 불러오지 못했어요. 앱을 다시 실행해 주세요.");
   }, 15000);
 </script>
 <script type="module">
 let pdfjsLib;
 try {
-  pdfjsLib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/legacy/build/pdf.min.mjs");
+  pdfjsLib = await import("./pdfjs/legacy/build/pdf.min.mjs");
   window.__libReady = true;
 } catch (e) {
   __showErr("PDF 라이브러리를 불러오지 못했어요: " + (e?.message || e));
   throw e;
 }
 
-const CDN = "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/";
+const CDN = new URL("./pdfjs/", location.href).href;
 pdfjsLib.GlobalWorkerOptions.workerSrc = CDN + "legacy/build/pdf.worker.min.mjs";
 
 const $ = (id) => document.getElementById(id);
